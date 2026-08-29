@@ -23,18 +23,21 @@ export const registerUser = async (req, res) => {
       });
     }
 
+    // Hash password before saving
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role: "admin",
     });
-    
+
     const workspace = await Workspace.create({
       name: `${name}'s Workspace`,
       owner: user._id,
     });
-    
+
     user.workspaceId = workspace._id;
     await user.save();
 
@@ -123,6 +126,7 @@ export const loginUser = async (req, res) => {
     });
   }
 };
+
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select(
