@@ -3,18 +3,106 @@ import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+// ========================================
+// REGISTER USER
+// ========================================
+
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const {
+      name,
+      workspaceName,
+      email,
+      password,
+    } = req.body;
 
-    if (!name || !email || !password) {
+    // ----------------------------------------
+    // REQUIRED FIELDS
+    // ----------------------------------------
+
+    if (
+      !name?.trim() ||
+      !workspaceName?.trim() ||
+      !email?.trim() ||
+      !password
+    ) {
       return res.status(400).json({
         success: false,
         message: "All fields are required",
       });
     }
 
-    const existingUser = await User.findOne({ email });
+    // ----------------------------------------
+    // NORMALIZE EMAIL
+    // ----------------------------------------
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // ----------------------------------------
+    // EMAIL VALIDATION
+    // ----------------------------------------
+
+    const emailRegex =
+      /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email address",
+      });
+    }
+
+    // ----------------------------------------
+    // PASSWORD VALIDATION
+    // ----------------------------------------
+
+    if (password.length < 12) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must be at least 12 characters long",
+      });
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must contain at least one uppercase letter",
+      });
+    }
+
+    if (!/[a-z]/.test(password)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must contain at least one lowercase letter",
+      });
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must contain at least one number",
+      });
+    }
+
+    if (!/[!@#$%^&*(),.?":{}|<>_\-+=/\\[\]]/.test(password)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must contain at least one special character",
+      });
+    }
+
+    // ----------------------------------------
+    // CHECK EXISTING USER
+    // ----------------------------------------
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+    });
 
     if (existingUser) {
       return res.status(400).json({
@@ -23,23 +111,46 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    // Hash password before saving
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ----------------------------------------
+    // HASH PASSWORD
+    // ----------------------------------------
+
+    const hashedPassword = await bcrypt.hash(
+      password,
+      10
+    );
+
+    // ----------------------------------------
+    // CREATE USER
+    // ----------------------------------------
 
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: normalizedEmail,
       password: hashedPassword,
       role: "admin",
     });
 
+    // ----------------------------------------
+    // CREATE WORKSPACE
+    // ----------------------------------------
+
     const workspace = await Workspace.create({
-      name: `${name}'s Workspace`,
+      name: workspaceName.trim(),
       owner: user._id,
     });
 
+    // ----------------------------------------
+    // LINK USER TO WORKSPACE
+    // ----------------------------------------
+
     user.workspaceId = workspace._id;
+
     await user.save();
+
+    // ----------------------------------------
+    // SUCCESS
+    // ----------------------------------------
 
     return res.status(201).json({
       success: true,
@@ -56,23 +167,32 @@ export const registerUser = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Registration failed",
     });
   }
 };
+
+// ========================================
+// LOGIN USER
+// ========================================
 
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (!email?.trim() || !password) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required",
       });
     }
 
-    const user = await User.findOne({ email });
+    const normalizedEmail =
+      email.trim().toLowerCase();
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+    });
 
     if (!user) {
       return res.status(401).json({
@@ -81,10 +201,11 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    const isPasswordCorrect = await bcrypt.compare(
-      password,
-      user.password
-    );
+    const isPasswordCorrect =
+      await bcrypt.compare(
+        password,
+        user.password
+      );
 
     if (!isPasswordCorrect) {
       return res.status(401).json({
@@ -122,16 +243,20 @@ export const loginUser = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Login failed",
     });
   }
 };
 
+// ========================================
+// GET CURRENT USER
+// ========================================
+
 export const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select(
-      "-password"
-    );
+    const user = await User.findById(
+      req.user.userId
+    ).select("-password");
 
     if (!user) {
       return res.status(404).json({
@@ -140,14 +265,14 @@ export const getMe = async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       user,
     });
   } catch (error) {
     console.error("Get Me Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server Error",
     });
