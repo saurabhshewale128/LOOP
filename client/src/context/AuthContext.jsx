@@ -10,7 +10,10 @@ import api from "../services/api";
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  // Get saved user immediately
+  // =====================================
+  // GET SAVED USER
+  // =====================================
+
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem("user");
 
@@ -18,6 +21,8 @@ export const AuthProvider = ({ children }) => {
       try {
         return JSON.parse(savedUser);
       } catch (error) {
+        console.error("Saved user parse error:", error);
+
         localStorage.removeItem("user");
         return null;
       }
@@ -31,6 +36,7 @@ export const AuthProvider = ({ children }) => {
   // =====================================
   // CHECK TOKEN
   // =====================================
+
   useEffect(() => {
     const token = localStorage.getItem("token");
 
@@ -74,7 +80,23 @@ export const AuthProvider = ({ children }) => {
   // =====================================
   // LOGIN
   // =====================================
+
   const login = (token, userData) => {
+    localStorage.setItem("token", token);
+
+    localStorage.setItem(
+      "user",
+      JSON.stringify(userData)
+    );
+
+    setUser(userData);
+  };
+
+  // =====================================
+  // REGISTER
+  // =====================================
+
+  const register = (token, userData) => {
     localStorage.setItem("token", token);
 
     localStorage.setItem(
@@ -88,6 +110,7 @@ export const AuthProvider = ({ children }) => {
   // =====================================
   // LOGOUT
   // =====================================
+
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -95,12 +118,17 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  // =====================================
+  // CONTEXT PROVIDER
+  // =====================================
+
   return (
     <AuthContext.Provider
       value={{
         user,
         loading,
         login,
+        register,
         logout,
       }}
     >
@@ -109,6 +137,12 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
+// =====================================
+// CUSTOM HOOK
+// =====================================
+
 export const useAuth = () => {
   return useContext(AuthContext);
 };
+
+export default AuthContext;
