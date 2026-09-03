@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import toast from "react-hot-toast";
-
 import api from "../../services/api";
 import Loading from "../../components/common/Loading";
 import ErrorState from "../../components/common/ErrorState";
@@ -10,14 +9,13 @@ import ErrorState from "../../components/common/ErrorState";
 const FeedbackList = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+
   console.log("🔐 CURRENT USER:", user);
+
   // ========================================
   // ROLE-BASED PERMISSIONS
   // ========================================
 
-  // Users can manage their own feedback.
-  // Managers can edit feedback.
-  // Admins have full access.
   const canEdit =
     user?.role === "admin" ||
     user?.role === "analyst";
@@ -32,7 +30,15 @@ const FeedbackList = () => {
   const [feedback, setFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [uploadingCSV, setUploadingCSV] = useState(false);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalFeedback, setTotalFeedback] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [hasPreviousPage, setHasPreviousPage] = useState(false);
 
   // ========================================
   // FILTERS
@@ -50,14 +56,24 @@ const FeedbackList = () => {
   // GET FEEDBACK
   // ========================================
 
-  const fetchFeedback = async () => {
+  const fetchFeedback = async (pageNumber = 1) => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await api.get("/feedback");
+      const response = await api.get(
+        `/feedback?page=${pageNumber}&limit=10`
+      );
 
       setFeedback(response.data.feedback || []);
+
+      setPage(response.data.page || pageNumber);
+      setTotalPages(response.data.totalPages || 1);
+      setTotalFeedback(response.data.total || 0);
+      setHasNextPage(response.data.hasNextPage || false);
+      setHasPreviousPage(
+        response.data.hasPreviousPage || false
+      );
     } catch (error) {
       console.error("❌ Feedback Error:", error);
 
@@ -75,31 +91,30 @@ const FeedbackList = () => {
   // ========================================
 
   useEffect(() => {
-    fetchFeedback();
-  }, []);
+    fetchFeedback(page);
+  }, [page]);
 
   // ========================================
-  // DELETE
+  // CSV IMPORT
   // ========================================
+
   const handleCSVUpload = async (event) => {
     const file = event.target.files?.[0];
-  
-    if (!file
 
-    ) return;
-  
+    if (!file) return;
+
     if (!file.name.toLowerCase().endsWith(".csv")) {
       toast.error("Please select a CSV file");
       event.target.value = "";
       return;
     }
-  
+
     try {
       setUploadingCSV(true);
-  
+
       const formData = new FormData();
       formData.append("file", file);
-  
+
       const response = await api.post(
         "/csv/feedback",
         formData,
@@ -109,100 +124,119 @@ const FeedbackList = () => {
           },
         }
       );
-  
+
       toast.success(
         response.data.message ||
           "CSV imported successfully"
       );
-  
-      await fetchFeedback();
-  
+
+      setPage(1);
+      await fetchFeedback(1);
     } catch (error) {
       console.error(
         "❌ CSV Upload Error:",
         error
       );
-  
+
       toast.error(
         error.response?.data?.message ||
           "Failed to upload CSV"
       );
-  
     } finally {
       setUploadingCSV(false);
-  
+
       // Same file पुन्हा select करता यावा
       event.target.value = "";
     }
   };
 
   // ========================================
-// EXPORT FEEDBACK CSV
-// ========================================
+  // EXPORT FEEDBACK CSV
+  // ========================================
 
-const handleExportCSV = () => {
-  try {
-    if (!feedback.length) {
-      toast.error("No feedback available to export");
-      return;
+  const handleExportCSV = () => {
+    try {
+      if (!feedback.length) {
+        toast.error(
+          "No feedback available to export"
+        );
+        return;
+      }
+
+      const headers = [
+        "customerName",
+        "email",
+        "source",
+        "message",
+        "rating",
+        "status",
+        "sentiment",
+        "category",
+        "priority",
+        "theme",
+        "summary",
+      ];
+
+      const escapeCSV = (value) => {
+        const text = String(value ?? "");
+
+        return `"${text.replace(/"/g, '""')}"`;
+      };
+
+      const rows = feedback.map((item) =>
+        headers
+          .map((header) =>
+            escapeCSV(item[header])
+          )
+          .join(",")
+      );
+
+      const csvContent = [
+        headers.join(","),
+        ...rows,
+      ].join("\n");
+
+      const blob = new Blob(
+        [csvContent],
+        {
+          type: "text/csv;charset=utf-8;",
+        }
+      );
+
+      const url =
+        URL.createObjectURL(blob);
+
+      const link =
+        document.createElement("a");
+
+      link.href = url;
+      link.download = "LOOP-feedback.csv";
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+
+      toast.success(
+        `${feedback.length} feedback records exported successfully`
+      );
+    } catch (error) {
+      console.error(
+        "❌ CSV Export Error:",
+        error
+      );
+
+      toast.error(
+        "Failed to export CSV"
+      );
     }
+  };
 
-    const headers = [
-      "customerName",
-      "email",
-      "source",
-      "message",
-      "rating",
-      "status",
-      "sentiment",
-      "category",
-      "priority",
-      "theme",
-      "summary",
-    ];
+  // ========================================
+  // DELETE
+  // ========================================
 
-    const escapeCSV = (value) => {
-      const text = String(value ?? "");
-      return `"${text.replace(/"/g, '""')}"`;
-    };
-
-    const rows = feedback.map((item) =>
-      headers
-        .map((header) => escapeCSV(item[header]))
-        .join(",")
-    );
-
-    const csvContent = [
-      headers.join(","),
-      ...rows,
-    ].join("\n");
-
-    const blob = new Blob(
-      [csvContent],
-      { type: "text/csv;charset=utf-8;" }
-    );
-
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = "LOOP-feedback.csv";
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(url);
-
-    toast.success(
-      `${feedback.length} feedback records exported successfully`
-    );
-  } catch (error) {
-    console.error("❌ CSV Export Error:", error);
-    toast.error("Failed to export CSV");
-  }
-};
   const handleDelete = async (id) => {
     const confirmDelete = window.confirm(
       "Are you sure you want to delete this feedback?"
@@ -211,13 +245,34 @@ const handleExportCSV = () => {
     if (!confirmDelete) return;
 
     try {
-      await api.delete(`/feedback/${id}`);
-
-      setFeedback((prev) =>
-        prev.filter((item) => item._id !== id)
+      await api.delete(
+        `/feedback/${id}`
       );
 
-      toast.success("Feedback deleted successfully");
+      // Remove from current page
+      setFeedback((prev) =>
+        prev.filter(
+          (item) => item._id !== id
+        )
+      );
+
+      // Update total count
+      setTotalFeedback(
+        (prev) => Math.max(prev - 1, 0)
+      );
+
+      toast.success(
+        "Feedback deleted successfully"
+      );
+
+      // If current page becomes empty,
+      // go to previous page
+      if (
+        feedback.length === 1 &&
+        page > 1
+      ) {
+        setPage((prev) => prev - 1);
+      }
     } catch (error) {
       console.error(
         "❌ Delete Feedback Error:",
@@ -240,7 +295,9 @@ const handleExportCSV = () => {
       .map((item) => item.theme)
       .filter(Boolean);
 
-    return [...new Set(uniqueThemes)].sort();
+    return [
+      ...new Set(uniqueThemes),
+    ].sort();
   }, [feedback]);
 
   // ========================================
@@ -284,15 +341,18 @@ const handleExportCSV = () => {
 
       const matchesRating =
         ratingFilter === "All" ||
-        Number(item.rating) === Number(ratingFilter);
+        Number(item.rating) ===
+          Number(ratingFilter);
 
       const matchesSentiment =
         sentimentFilter === "All" ||
-        item.sentiment === sentimentFilter;
+        item.sentiment ===
+          sentimentFilter;
 
       const matchesPriority =
         priorityFilter === "All" ||
-        item.priority === priorityFilter;
+        item.priority ===
+          priorityFilter;
 
       const matchesTheme =
         themeFilter === "All" ||
@@ -408,7 +468,9 @@ const handleExportCSV = () => {
   // ========================================
 
   if (loading) {
-    return <Loading message="Loading feedback..." />;
+    return (
+      <Loading message="Loading feedback..." />
+    );
   }
 
   // ========================================
@@ -419,7 +481,7 @@ const handleExportCSV = () => {
     return (
       <ErrorState
         message={error}
-        onRetry={fetchFeedback}
+        onRetry={() => fetchFeedback(page)}
       />
     );
   }
@@ -460,6 +522,7 @@ const handleExportCSV = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
+
             <input
               id="csv-upload-input"
               type="file"
@@ -469,7 +532,10 @@ const handleExportCSV = () => {
             />
 
             <button
-              onClick={fetchFeedback}
+              onClick={() => {
+                setPage(1);
+                fetchFeedback(1);
+              }}
               className="w-full sm:w-auto border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-5 py-3 rounded-xl font-semibold transition flex items-center justify-center gap-2"
             >
               🔄 Refresh
@@ -477,38 +543,48 @@ const handleExportCSV = () => {
 
             <button
               onClick={() =>
-              document.getElementById("csv-upload-input").click()
+                document
+                  .getElementById(
+                    "csv-upload-input"
+                  )
+                  .click()
               }
               disabled={uploadingCSV}
               className="w-full sm:w-auto bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-5 py-3 rounded-xl font-semibold transition shadow-sm flex items-center justify-center gap-2"
-             >
-              📥 {uploadingCSV ? "Uploading..." : "Import CSV"}
+            >
+              📥{" "}
+              {uploadingCSV
+                ? "Uploading..."
+                : "Import CSV"}
             </button>
+
             <button
-               onClick={handleExportCSV}
-               className="w-full sm:w-auto bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-semibold transition shadow-sm flex items-center justify-center gap-2"
+              onClick={handleExportCSV}
+              className="w-full sm:w-auto bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-semibold transition shadow-sm flex items-center justify-center gap-2"
             >
               📤 Export CSV
             </button>
 
             <button
-              onClick={() => navigate("/feedback/add")}
+              onClick={() =>
+                navigate("/feedback/add")
+              }
               className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-semibold transition shadow-sm flex items-center justify-center gap-2"
             >
               ➕ Add Feedback
             </button>
 
-
           </div>
 
         </div>
-
 
         {/* ========================================
             SUMMARY CARDS
         ======================================== */}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
+          {/* TOTAL */}
 
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
 
@@ -521,7 +597,7 @@ const handleExportCSV = () => {
                 </p>
 
                 <p className="text-2xl font-bold text-slate-900 mt-1">
-                  {feedback.length}
+                  {totalFeedback}
                 </p>
 
               </div>
@@ -534,6 +610,7 @@ const handleExportCSV = () => {
 
           </div>
 
+          {/* POSITIVE */}
 
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
 
@@ -549,7 +626,8 @@ const handleExportCSV = () => {
                   {
                     feedback.filter(
                       (item) =>
-                        item.sentiment === "Positive"
+                        item.sentiment ===
+                        "Positive"
                     ).length
                   }
                 </p>
@@ -564,6 +642,7 @@ const handleExportCSV = () => {
 
           </div>
 
+          {/* NEGATIVE */}
 
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
 
@@ -579,7 +658,8 @@ const handleExportCSV = () => {
                   {
                     feedback.filter(
                       (item) =>
-                        item.sentiment === "Negative"
+                        item.sentiment ===
+                        "Negative"
                     ).length
                   }
                 </p>
@@ -594,6 +674,7 @@ const handleExportCSV = () => {
 
           </div>
 
+          {/* HIGH PRIORITY */}
 
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
 
@@ -609,7 +690,8 @@ const handleExportCSV = () => {
                   {
                     feedback.filter(
                       (item) =>
-                        item.priority === "High"
+                        item.priority ===
+                        "High"
                     ).length
                   }
                 </p>
@@ -625,7 +707,6 @@ const handleExportCSV = () => {
           </div>
 
         </div>
-
 
         {/* ========================================
             SEARCH & FILTERS
@@ -650,12 +731,13 @@ const handleExportCSV = () => {
             {activeFilterCount > 0 && (
               <span className="inline-flex items-center w-fit bg-blue-50 text-blue-700 border border-blue-100 px-3 py-1.5 rounded-lg text-xs font-semibold">
                 {activeFilterCount} active filter
-                {activeFilterCount > 1 ? "s" : ""}
+                {activeFilterCount > 1
+                  ? "s"
+                  : ""}
               </span>
             )}
 
           </div>
-
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
@@ -687,7 +769,6 @@ const handleExportCSV = () => {
 
             </div>
 
-
             {/* SOURCE */}
 
             <div>
@@ -699,10 +780,13 @@ const handleExportCSV = () => {
               <select
                 value={sourceFilter}
                 onChange={(e) =>
-                  setSourceFilter(e.target.value)
+                  setSourceFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Sources
                 </option>
@@ -726,10 +810,10 @@ const handleExportCSV = () => {
                 <option value="Other">
                   Other
                 </option>
+
               </select>
 
             </div>
-
 
             {/* STATUS */}
 
@@ -742,10 +826,13 @@ const handleExportCSV = () => {
               <select
                 value={statusFilter}
                 onChange={(e) =>
-                  setStatusFilter(e.target.value)
+                  setStatusFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Status
                 </option>
@@ -761,10 +848,10 @@ const handleExportCSV = () => {
                 <option value="Resolved">
                   Resolved
                 </option>
+
               </select>
 
             </div>
-
 
             {/* RATING */}
 
@@ -777,10 +864,13 @@ const handleExportCSV = () => {
               <select
                 value={ratingFilter}
                 onChange={(e) =>
-                  setRatingFilter(e.target.value)
+                  setRatingFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Ratings
                 </option>
@@ -809,7 +899,6 @@ const handleExportCSV = () => {
 
             </div>
 
-
             {/* SENTIMENT */}
 
             <div>
@@ -821,10 +910,13 @@ const handleExportCSV = () => {
               <select
                 value={sentimentFilter}
                 onChange={(e) =>
-                  setSentimentFilter(e.target.value)
+                  setSentimentFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Sentiments
                 </option>
@@ -845,7 +937,6 @@ const handleExportCSV = () => {
 
             </div>
 
-
             {/* PRIORITY */}
 
             <div>
@@ -857,10 +948,13 @@ const handleExportCSV = () => {
               <select
                 value={priorityFilter}
                 onChange={(e) =>
-                  setPriorityFilter(e.target.value)
+                  setPriorityFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Priorities
                 </option>
@@ -881,7 +975,6 @@ const handleExportCSV = () => {
 
             </div>
 
-
             {/* THEME */}
 
             <div>
@@ -893,10 +986,13 @@ const handleExportCSV = () => {
               <select
                 value={themeFilter}
                 onChange={(e) =>
-                  setThemeFilter(e.target.value)
+                  setThemeFilter(
+                    e.target.value
+                  )
                 }
                 className="w-full border border-slate-300 rounded-xl px-4 py-3 bg-white outline-none focus:ring-2 focus:ring-blue-500"
               >
+
                 <option value="All">
                   All Themes
                 </option>
@@ -916,7 +1012,6 @@ const handleExportCSV = () => {
 
           </div>
 
-
           {/* FILTER FOOTER */}
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5 pt-4 border-t border-slate-200">
@@ -932,13 +1027,12 @@ const handleExportCSV = () => {
               {" "}of{" "}
 
               <span className="font-bold text-slate-800">
-                {feedback.length}
+                {totalFeedback}
               </span>
 
               {" "}feedback
 
             </p>
-
 
             {activeFilterCount > 0 && (
               <button
@@ -952,7 +1046,6 @@ const handleExportCSV = () => {
           </div>
 
         </div>
-
 
         {/* ========================================
             EMPTY STATE
@@ -1013,7 +1106,6 @@ const handleExportCSV = () => {
 
               </div>
 
-
               <div className="overflow-x-auto">
 
                 <table className="w-full min-w-[1500px]">
@@ -1066,198 +1158,195 @@ const handleExportCSV = () => {
 
                   </thead>
 
-
                   <tbody>
 
-                    {filteredFeedback.map((item) => (
+                    {filteredFeedback.map(
+                      (item) => (
 
-                      <tr
-                        key={item._id}
-                        className="border-t border-slate-100 hover:bg-slate-50 transition"
-                      >
+                        <tr
+                          key={item._id}
+                          className="border-t border-slate-100 hover:bg-slate-50 transition"
+                        >
 
-                        {/* CUSTOMER */}
+                          {/* CUSTOMER */}
 
-                        <td className="px-6 py-5">
+                          <td className="px-6 py-5">
 
-                          <p className="font-semibold text-slate-900">
-                            {item.customerName}
-                          </p>
+                            <p className="font-semibold text-slate-900">
+                              {item.customerName}
+                            </p>
 
-                          <p className="text-sm text-slate-500 mt-1">
-                            {item.email || "-"}
-                          </p>
+                            <p className="text-sm text-slate-500 mt-1">
+                              {item.email || "-"}
+                            </p>
 
-                        </td>
+                          </td>
 
+                          {/* SOURCE */}
 
-                        {/* SOURCE */}
+                          <td className="px-6 py-5">
 
-                        <td className="px-6 py-5">
-
-                          <span className="text-sm text-slate-700">
-                            {item.source || "-"}
-                          </span>
-
-                        </td>
-
-
-                        {/* MESSAGE */}
-
-                        <td className="px-6 py-5 max-w-xs">
-
-                          <p
-                            className="truncate text-slate-700"
-                            title={item.message}
-                          >
-                            {item.message || "-"}
-                          </p>
-
-                        </td>
-
-
-                        {/* RATING */}
-
-                        <td className="px-6 py-5">
-
-                          {item.rating ? (
-
-                            <span className="font-semibold text-slate-800">
-                              ⭐ {item.rating}/5
+                            <span className="text-sm text-slate-700">
+                              {item.source || "-"}
                             </span>
 
-                          ) : (
-                            "-"
-                          )}
+                          </td>
 
-                        </td>
+                          {/* MESSAGE */}
 
+                          <td className="px-6 py-5 max-w-xs">
 
-                        {/* SENTIMENT */}
+                            <p
+                              className="truncate text-slate-700"
+                              title={item.message}
+                            >
+                              {item.message || "-"}
+                            </p>
 
-                        <td className="px-6 py-5">
+                          </td>
 
-                          <span
-                            className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getSentimentStyle(
-                              item.sentiment
-                            )}`}
-                          >
-                            {item.sentiment || "Neutral"}
-                          </span>
+                          {/* RATING */}
 
-                        </td>
+                          <td className="px-6 py-5">
 
+                            {item.rating ? (
+                              <span className="font-semibold text-slate-800">
+                                ⭐ {item.rating}/5
+                              </span>
+                            ) : (
+                              "-"
+                            )}
 
-                        {/* CATEGORY */}
+                          </td>
 
-                        <td className="px-6 py-5">
+                          {/* SENTIMENT */}
 
-                          <span className="inline-flex px-3 py-1 rounded-full border border-purple-200 bg-purple-100 text-purple-700 text-xs font-semibold">
-                            {item.category || "Other"}
-                          </span>
+                          <td className="px-6 py-5">
 
-                        </td>
+                            <span
+                              className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getSentimentStyle(
+                                item.sentiment
+                              )}`}
+                            >
+                              {item.sentiment ||
+                                "Neutral"}
+                            </span>
 
+                          </td>
 
-                        {/* THEME */}
+                          {/* CATEGORY */}
 
-                        <td className="px-6 py-5">
+                          <td className="px-6 py-5">
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              navigate(
-                                `/analytics?theme=${encodeURIComponent(
-                                  item.theme || "General"
-                                )}`
-                              )
-                            }
-                            className="inline-flex px-3 py-1 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-semibold transition"
-                          >
-                            {item.theme || "General"}
-                          </button>
+                            <span className="inline-flex px-3 py-1 rounded-full border border-purple-200 bg-purple-100 text-purple-700 text-xs font-semibold">
+                              {item.category ||
+                                "Other"}
+                            </span>
 
-                        </td>
+                          </td>
 
+                          {/* THEME */}
 
-                        {/* PRIORITY */}
-
-                        <td className="px-6 py-5">
-
-                          <span
-                            className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getPriorityStyle(
-                              item.priority
-                            )}`}
-                          >
-                            {item.priority || "Medium"}
-                          </span>
-
-                        </td>
-
-
-                        {/* STATUS */}
-
-                        <td className="px-6 py-5">
-
-                          <span
-                            className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getStatusStyle(
-                              item.status
-                            )}`}
-                          >
-                            {item.status || "-"}
-                          </span>
-
-                        </td>
-
-
-                        {/* ACTIONS */}
-
-                        <td className="px-6 py-5">
-
-                          <div className="flex items-center gap-2">
+                          <td className="px-6 py-5">
 
                             <button
+                              type="button"
                               onClick={() =>
                                 navigate(
-                                  `/feedback/view/${item._id}`
+                                  `/analytics?theme=${encodeURIComponent(
+                                    item.theme ||
+                                      "General"
+                                  )}`
                                 )
                               }
-                              className="px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-sm font-semibold"
+                              className="inline-flex px-3 py-1 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-semibold transition"
                             >
-                              View
+                              {item.theme ||
+                                "General"}
                             </button>
 
-                            {canEdit && (
+                          </td>
+
+                          {/* PRIORITY */}
+
+                          <td className="px-6 py-5">
+
+                            <span
+                              className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getPriorityStyle(
+                                item.priority
+                              )}`}
+                            >
+                              {item.priority ||
+                                "Medium"}
+                            </span>
+
+                          </td>
+
+                          {/* STATUS */}
+
+                          <td className="px-6 py-5">
+
+                            <span
+                              className={`inline-flex px-3 py-1 rounded-full border text-xs font-semibold ${getStatusStyle(
+                                item.status
+                              )}`}
+                            >
+                              {item.status || "-"}
+                            </span>
+
+                          </td>
+
+                          {/* ACTIONS */}
+
+                          <td className="px-6 py-5">
+
+                            <div className="flex items-center gap-2">
+
                               <button
                                 onClick={() =>
                                   navigate(
-                                    `/feedback/edit/${item._id}`
+                                    `/feedback/view/${item._id}`
                                   )
                                 }
-                                className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold"
+                                className="px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-sm font-semibold"
                               >
-                                Edit
+                                View
                               </button>
-                            )}
 
-                            {canDelete && (
-                              <button
-                                onClick={() =>
-                                  handleDelete(item._id)
-                                }
-                                className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-sm font-semibold"
-                              >
-                                Delete
-                              </button>
-                            )}
+                              {canEdit && (
+                                <button
+                                  onClick={() =>
+                                    navigate(
+                                      `/feedback/edit/${item._id}`
+                                    )
+                                  }
+                                  className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold"
+                                >
+                                  Edit
+                                </button>
+                              )}
 
-                          </div>
+                              {canDelete && (
+                                <button
+                                  onClick={() =>
+                                    handleDelete(
+                                      item._id
+                                    )
+                                  }
+                                  className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-sm font-semibold"
+                                >
+                                  Delete
+                                </button>
+                              )}
 
-                        </td>
+                            </div>
 
-                      </tr>
+                          </td>
 
-                    ))}
+                        </tr>
+
+                      )
+                    )}
 
                   </tbody>
 
@@ -1267,229 +1356,297 @@ const handleExportCSV = () => {
 
             </div>
 
+            {/* ========================================
+                PAGINATION
+            ======================================== */}
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm mt-5 px-5 py-4">
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+
+                <p className="text-sm text-slate-500">
+
+                  Page{" "}
+
+                  <span className="font-bold text-slate-800">
+                    {page}
+                  </span>
+
+                  {" "}of{" "}
+
+                  <span className="font-bold text-slate-800">
+                    {totalPages}
+                  </span>
+
+                </p>
+
+                <div className="flex items-center gap-2">
+
+                  <button
+                    onClick={() =>
+                      setPage(
+                        (prev) =>
+                          Math.max(
+                            prev - 1,
+                            1
+                          )
+                      )
+                    }
+                    disabled={!hasPreviousPage}
+                    className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
+                  >
+                    ← Previous
+                  </button>
+
+                  <span className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold">
+                    {page}
+                  </span>
+
+                  <button
+                    onClick={() =>
+                      setPage(
+                        (prev) =>
+                          Math.min(
+                            prev + 1,
+                            totalPages
+                          )
+                      )
+                    }
+                    disabled={!hasNextPage}
+                    className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
+                  >
+                    Next →
+                  </button>
+
+                </div>
+
+              </div>
+
+            </div>
 
             {/* ========================================
                 MOBILE / TABLET CARDS
             ======================================== */}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:hidden gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:hidden gap-5 mt-5">
 
-              {filteredFeedback.map((item) => (
+              {filteredFeedback.map(
+                (item) => (
 
-                <div
-                  key={item._id}
-                  className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition"
-                >
+                  <div
+                    key={item._id}
+                    className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition"
+                  >
 
-                  {/* CARD HEADER */}
+                    {/* CARD HEADER */}
 
-                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-3">
 
-                    <div className="min-w-0">
+                      <div className="min-w-0">
 
-                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3">
 
-                        <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
-                          {item.customerName
-                            ?.charAt(0)
-                            ?.toUpperCase() || "C"}
-                        </div>
+                          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                            {item.customerName
+                              ?.charAt(0)
+                              ?.toUpperCase() ||
+                              "C"}
+                          </div>
 
-                        <div className="min-w-0">
+                          <div className="min-w-0">
 
-                          <h3 className="font-bold text-slate-900 truncate">
-                            {item.customerName}
-                          </h3>
+                            <h3 className="font-bold text-slate-900 truncate">
+                              {item.customerName}
+                            </h3>
 
-                          <p className="text-sm text-slate-500 truncate">
-                            {item.email || "-"}
-                          </p>
+                            <p className="text-sm text-slate-500 truncate">
+                              {item.email || "-"}
+                            </p>
+
+                          </div>
 
                         </div>
 
                       </div>
 
-                    </div>
-
-
-                    <span
-                      className={`shrink-0 px-3 py-1 rounded-full border text-xs font-semibold ${getPriorityStyle(
-                        item.priority
-                      )}`}
-                    >
-                      {item.priority || "Medium"}
-                    </span>
-
-                  </div>
-
-
-                  {/* MESSAGE */}
-
-                  <div className="mt-5">
-
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
-                      Customer Message
-                    </p>
-
-                    <div className="bg-slate-50 rounded-xl p-4">
-
-                      <p className="text-sm text-slate-700 leading-relaxed">
-                        {item.message || "-"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-
-                  {/* DETAILS */}
-
-                  <div className="grid grid-cols-2 gap-4 mt-5">
-
-                    <div>
-
-                      <p className="text-xs text-slate-500">
-                        Source
-                      </p>
-
-                      <p className="text-sm font-semibold text-slate-800 mt-1">
-                        {item.source || "-"}
-                      </p>
-
-                    </div>
-
-
-                    <div>
-
-                      <p className="text-xs text-slate-500">
-                        Rating
-                      </p>
-
-                      <p className="text-sm font-semibold text-slate-800 mt-1">
-                        {item.rating
-                          ? `⭐ ${item.rating}/5`
-                          : "-"}
-                      </p>
-
-                    </div>
-
-
-                    <div>
-
-                      <p className="text-xs text-slate-500">
-                        Category
-                      </p>
-
-                      <span className="inline-flex mt-1 px-2.5 py-1 rounded-full border border-purple-200 bg-purple-100 text-purple-700 text-xs font-semibold">
-                        {item.category || "Other"}
-                      </span>
-
-                    </div>
-
-
-                    <div>
-
-                      <p className="text-xs text-slate-500">
-                        Sentiment
-                      </p>
-
                       <span
-                        className={`inline-flex mt-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${getSentimentStyle(
-                          item.sentiment
+                        className={`shrink-0 px-3 py-1 rounded-full border text-xs font-semibold ${getPriorityStyle(
+                          item.priority
                         )}`}
                       >
-                        {item.sentiment || "Neutral"}
+                        {item.priority ||
+                          "Medium"}
                       </span>
 
                     </div>
 
+                    {/* MESSAGE */}
 
-                    <div>
+                    <div className="mt-5">
 
-                      <p className="text-xs text-slate-500">
-                        Status
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                        Customer Message
                       </p>
 
-                      <span
-                        className={`inline-flex mt-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${getStatusStyle(
-                          item.status
-                        )}`}
-                      >
-                        {item.status || "-"}
-                      </span>
+                      <div className="bg-slate-50 rounded-xl p-4">
+
+                        <p className="text-sm text-slate-700 leading-relaxed">
+                          {item.message || "-"}
+                        </p>
+
+                      </div>
 
                     </div>
 
+                    {/* DETAILS */}
 
-                    <div>
+                    <div className="grid grid-cols-2 gap-4 mt-5">
 
-                      <p className="text-xs text-slate-500">
-                        Theme
-                      </p>
+                      <div>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigate(
-                            `/analytics?theme=${encodeURIComponent(
-                              item.theme || "General"
-                            )}`
-                          )
-                        }
-                        className="mt-1 inline-flex px-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-semibold transition"
-                      >
-                        {item.theme || "General"}
-                      </button>
+                        <p className="text-xs text-slate-500">
+                          Source
+                        </p>
+
+                        <p className="text-sm font-semibold text-slate-800 mt-1">
+                          {item.source || "-"}
+                        </p>
+
+                      </div>
+
+                      <div>
+
+                        <p className="text-xs text-slate-500">
+                          Rating
+                        </p>
+
+                        <p className="text-sm font-semibold text-slate-800 mt-1">
+                          {item.rating
+                            ? `⭐ ${item.rating}/5`
+                            : "-"}
+                        </p>
+
+                      </div>
+
+                      <div>
+
+                        <p className="text-xs text-slate-500">
+                          Category
+                        </p>
+
+                        <span className="inline-flex mt-1 px-2.5 py-1 rounded-full border border-purple-200 bg-purple-100 text-purple-700 text-xs font-semibold">
+                          {item.category ||
+                            "Other"}
+                        </span>
+
+                      </div>
+
+                      <div>
+
+                        <p className="text-xs text-slate-500">
+                          Sentiment
+                        </p>
+
+                        <span
+                          className={`inline-flex mt-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${getSentimentStyle(
+                            item.sentiment
+                          )}`}
+                        >
+                          {item.sentiment ||
+                            "Neutral"}
+                        </span>
+
+                      </div>
+
+                      <div>
+
+                        <p className="text-xs text-slate-500">
+                          Status
+                        </p>
+
+                        <span
+                          className={`inline-flex mt-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${getStatusStyle(
+                            item.status
+                          )}`}
+                        >
+                          {item.status || "-"}
+                        </span>
+
+                      </div>
+
+                      <div>
+
+                        <p className="text-xs text-slate-500">
+                          Theme
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              `/analytics?theme=${encodeURIComponent(
+                                item.theme ||
+                                  "General"
+                              )}`
+                            )
+                          }
+                          className="mt-1 inline-flex px-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-semibold transition"
+                        >
+                          {item.theme ||
+                            "General"}
+                        </button>
+
+                      </div>
 
                     </div>
 
-                  </div>
+                    {/* ACTIONS */}
 
+                    <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-200">
 
-                  {/* ACTIONS */}
-
-                  <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-slate-200">
-
-                    <button
-                      onClick={() =>
-                        navigate(
-                          `/feedback/view/${item._id}`
-                        )
-                      }
-                      className="flex-1 min-w-[80px] bg-purple-50 hover:bg-purple-100 text-purple-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
-                    >
-                      👁️ View
-                    </button>
-
-                    {canEdit && (
                       <button
                         onClick={() =>
                           navigate(
-                            `/feedback/edit/${item._id}`
+                            `/feedback/view/${item._id}`
                           )
                         }
-                        className="flex-1 min-w-[80px] bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
+                        className="flex-1 min-w-[80px] bg-purple-50 hover:bg-purple-100 text-purple-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
                       >
-                        ✏️ Edit
+                        👁️ View
                       </button>
-                    )}
 
-                    {canDelete && (
-                      <button
-                        onClick={() =>
-                          handleDelete(item._id)
-                        }
-                        className="flex-1 min-w-[80px] bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
-                      >
-                        🗑️ Delete
-                      </button>
-                    )}
+                      {canEdit && (
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/feedback/edit/${item._id}`
+                            )
+                          }
+                          className="flex-1 min-w-[80px] bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
+
+                      {canDelete && (
+                        <button
+                          onClick={() =>
+                            handleDelete(
+                              item._id
+                            )
+                          }
+                          className="flex-1 min-w-[80px] bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2.5 rounded-lg font-semibold text-sm transition"
+                        >
+                          🗑️ Delete
+                        </button>
+                      )}
+
+                    </div>
 
                   </div>
 
-                </div>
-
-              ))}
+                )
+              )}
 
             </div>
 

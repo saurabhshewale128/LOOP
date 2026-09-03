@@ -136,30 +136,37 @@ export const registerUser = async (req, res) => {
     // ----------------------------------------
 
     const workspace = await Workspace.create({
-      name: workspaceName.trim(),
+      name: `${name}'s Workspace`,
       owner: user._id,
     });
-
-    // ----------------------------------------
-    // LINK USER TO WORKSPACE
-    // ----------------------------------------
-
+    
     user.workspaceId = workspace._id;
-
     await user.save();
-
-    // ----------------------------------------
-    // SUCCESS
-    // ----------------------------------------
-
+    
+    // Create login token
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+        workspaceId: user.workspaceId,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
+    );
+    
     return res.status(201).json({
       success: true,
       message: "Registration successful",
+      token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
+        workspaceId: user.workspaceId,
       },
     });
   } catch (error) {

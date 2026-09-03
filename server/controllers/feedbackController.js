@@ -210,7 +210,14 @@ export const getFeedback = async (req, res) => {
       source,
       status,
       rating,
+      page = 1,
+      limit = 10,
     } = req.query;
+    
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const skip = (pageNumber - 1) * limitNumber;
+   
 
     // ========================================
     // BASE QUERY
@@ -333,9 +340,14 @@ export const getFeedback = async (req, res) => {
     // GET FILTERED FEEDBACK
     // ========================================
 
-    const feedback = await Feedback.find(query).sort({
-      createdAt: -1,
-    });
+    const [feedback, total] = await Promise.all([
+      Feedback.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNumber),
+    
+      Feedback.countDocuments(query),
+    ]);
 
     // ========================================
     // RESPONSE
@@ -344,6 +356,13 @@ export const getFeedback = async (req, res) => {
     res.status(200).json({
       success: true,
       count: feedback.length,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber),
+      hasNextPage: pageNumber < Math.ceil(total / limitNumber),
+      hasPreviousPage: pageNumber > 1,
+    
       filters: {
         search: search || "",
         sentiment: sentiment || "",
@@ -354,6 +373,7 @@ export const getFeedback = async (req, res) => {
         status: status || "",
         rating: rating || "",
       },
+    
       feedback,
     });
 
