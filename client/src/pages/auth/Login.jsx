@@ -53,9 +53,17 @@ const Login = () => {
         password: formData.password,
       });
 
-      const { token, user } = response.data;
+      const token = response.data?.token;
+      const user = response.data?.user;
 
-      // Save authentication
+      if (!token || typeof token !== "string") {
+       console.error("Invalid token received:", response.data);
+       throw new Error("Authentication token was not received");
+      }
+
+      localStorage.setItem("token", token);
+     localStorage.setItem("user", JSON.stringify(user));
+
       login(token, user);
 
       toast.success("Login successful!");

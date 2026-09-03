@@ -146,10 +146,18 @@ const Register = () => {
       // SAVE AUTH SESSION
       // =====================================
 
-      register(
-        response.data.token,
-        response.data.user
-      );
+      const token = response.data?.token;
+      const user = response.data?.user;
+      
+      if (!token || typeof token !== "string") {
+        console.error("Invalid registration token:", response.data);
+        throw new Error("Authentication token was not received");
+      }
+      
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(user));
+      
+      register(token, user);
 
       toast.success(
         "Workspace created successfully!"
